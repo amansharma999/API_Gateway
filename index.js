@@ -1,60 +1,98 @@
-const express = require("express");
-const morgan = require("morgan");
-const { createProxyMiddleware } = require("http-proxy-middleware");
-const rateLimit = require("express-rate-limit");
-const axios = require("axios");
-const app = express();
+const express = require('express');
+const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
+const axios = require('axios');
+const rateLimit = require('express-rate-limit');
+const morgan = require('morgan');
 
+const app = express();
 const PORT = process.env.PORT || 3005;
 
 const limiter = rateLimit({
-  windowMs: 2 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 100 requests per windowMs
+  windowMs: 2 * 60 * 1000, // 2 minutes
+  max: 50, // limit each IP to 50 requests per windowMs
 });
 
 app.use(morgan("combined"));
 app.use(limiter);
-//###########################################
-app.use("/bookingservice", async (req, res, next) => {
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Middleware to check JWT token by calling AuthService
+const authenticate = async (req, res, next) => {
+  const token = req.headers['x-access-token'];
+  if (!token) {
+    return res.status(401).json({ message: 'No token provided' });
+  }
+
   try {
-    const response = await axios.get(
-      "http://localhost:3001/api/v1/isauthenticated",
-      {
-        headers: {
-          "x-access-token": req.headers["x-access-token"],
-        },
-      }
-    );
-    console.log(response);
+    const response = await axios.get('http://localhost:3001/authservice/api/v1/isauthenticated', {
+      headers: { 'x-access-token': token },
+    });
     if (response.data.success) {
       next();
     } else {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
+      res.status(401).json({ message: 'Failed to authenticate token' });
     }
-  } catch (error) {
-    return res.status(401).json({
-      message: "Unauthorized",
-    });
+  } catch (err) {
+    res.status(401).json({ message: 'Failed to authenticate token' });
   }
-});
+};
 
-//###########################################
-
+// Route to AuthService
 app.use(
-  "/bookingservice",
+  '/authservice',
   createProxyMiddleware({
-    target: "http://localhost:3002/bookingservice",
+    target: 'http://localhost:3001/authservice',
     changeOrigin: true,
+    on: { proxyReq: fixRequestBody }, // Fix for body-parser issues
+    onError: (err, req, res) => {
+      res.status(500).json({ error: 'Proxy error', details: err.message });
+    },
   })
 );
 
-// app.get("/home", (req, res) => {
-//   return res.json({
-//     message: "OK",
-//   });
-// });
+// Route to BookingService (protected)
+app.use(
+  '/bookingservice',
+  authenticate,
+  createProxyMiddleware({
+    target: 'http://localhost:3002/bookingservice',
+    changeOrigin: true,
+    on: { proxyReq: fixRequestBody }, // Fix for body-parser issues
+    onError: (err, req, res) => {
+      res.status(500).json({ error: 'Proxy error', details: err.message });
+    },
+  })
+);
+
+// Route to FlightsAndSearchService 
+app.use(
+  '/flightsservice', 
+  createProxyMiddleware({
+    target: 'http://localhost:3000/flightsservice',
+    changeOrigin: true,
+    on: { proxyReq: fixRequestBody }, // Fix for body-parser issues
+    onError: (err, req, res) => {
+      res.status(500).json({ error: 'Proxy error', details: err.message });
+    },
+  })
+);
+
+
+// Route to ReminderService (protected)
+app.use(
+  '/reminderservice',
+  authenticate,
+  createProxyMiddleware({
+    target: 'http://localhost:3004/reminderservice',
+    changeOrigin: true,
+    on: { proxyReq: fixRequestBody }, // Fix for body-parser issues
+    onError: (err, req, res) => {
+      res.status(500).json({ error: 'Proxy error', details: err.message });
+    },
+  })
+);
+
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`API Gateway running on port ${PORT}`);
 });
