@@ -1,14 +1,15 @@
+require('dotenv').config();
 const express = require('express');
-const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 const axios = require('axios');
-const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+const { createProxyMiddleware } = require('http-proxy-middleware');
+const { fixRequestBody } = require('./middlewares/fixRequestBody');
 
 const app = express();
-const PORT = process.env.PORT || 3005;
 
 const limiter = rateLimit({
-  windowMs: 2 * 60 * 1000, // 2 minutes
+  windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50, // limit each IP to 50 requests per windowMs
 });
 
@@ -25,7 +26,7 @@ const authenticate = async (req, res, next) => {
   }
 
   try {
-    const response = await axios.get('http://localhost:3001/authservice/api/v1/isauthenticated', {
+    const response = await axios.get(`${process.env.AUTH_SERVICE_URL}/api/v1/isauthenticated`, {
       headers: { 'x-access-token': token },
     });
     if (response.data.success) {
@@ -42,7 +43,7 @@ const authenticate = async (req, res, next) => {
 app.use(
   '/authservice',
   createProxyMiddleware({
-    target: 'http://localhost:3001/authservice',
+    target: process.env.AUTH_SERVICE_URL,
     changeOrigin: true,
     on: { proxyReq: fixRequestBody }, // Fix for body-parser issues
     onError: (err, req, res) => {
@@ -56,7 +57,7 @@ app.use(
   '/bookingservice',
   authenticate,
   createProxyMiddleware({
-    target: 'http://localhost:3002/bookingservice',
+    target: process.env.BOOKING_SERVICE_URL,
     changeOrigin: true,
     on: { proxyReq: fixRequestBody }, // Fix for body-parser issues
     onError: (err, req, res) => {
@@ -65,11 +66,11 @@ app.use(
   })
 );
 
-// Route to FlightsAndSearchService 
+// Route to FlightsAndSearchService
 app.use(
-  '/flightsservice', 
+  '/flightsservice',
   createProxyMiddleware({
-    target: 'http://localhost:3000/flightsservice',
+    target: process.env.FLIGHTS_SERVICE_URL,
     changeOrigin: true,
     on: { proxyReq: fixRequestBody }, // Fix for body-parser issues
     onError: (err, req, res) => {
@@ -77,14 +78,13 @@ app.use(
     },
   })
 );
-
 
 // Route to ReminderService (protected)
 app.use(
   '/reminderservice',
   authenticate,
   createProxyMiddleware({
-    target: 'http://localhost:3004/reminderservice',
+    target: process.env.REMINDER_SERVICE_URL,
     changeOrigin: true,
     on: { proxyReq: fixRequestBody }, // Fix for body-parser issues
     onError: (err, req, res) => {
@@ -93,6 +93,7 @@ app.use(
   })
 );
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`API Gateway running on port ${PORT}`);
+  console.log(`API Gateway is running on port ${PORT}`);
 });
